@@ -395,10 +395,6 @@ public class WebAuthProvider {
                 ex = new AuthenticationException("a0.invalid_configuration", "The application isn't configured properly for the social connection. Please check your Auth0's application configuration");
             }
             callback.onFailure(ex);
-        } else if (values.containsKey(KEY_STATE) && !values.get(KEY_STATE).equals(getState())) {
-            Log.e(TAG, String.format("Received state doesn't match. Received %s but expected %s", values.get(KEY_STATE), getState()));
-            final AuthenticationException ex = new AuthenticationException("access_denied", "The received state is invalid. Try again.");
-            callback.onFailure(ex);
         } else if (getResponseType().contains(RESPONSE_TYPE_ID_TOKEN) && !hasValidNonce(getNonce(), values.get(KEY_ID_TOKEN))) {
             Log.e(TAG, "Received nonce doesn't match.");
             final AuthenticationException ex = new AuthenticationException("access_denied", "The received nonce is invalid. Try again.");
