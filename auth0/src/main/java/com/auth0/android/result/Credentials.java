@@ -25,6 +25,8 @@
 package com.auth0.android.result;
 
 
+import android.os.Parcel;
+import android.os.Parcelable;
 import android.support.annotation.Nullable;
 
 import com.google.gson.annotations.SerializedName;
@@ -38,7 +40,7 @@ import com.google.gson.annotations.SerializedName;
  * <li><i>type</i>: The type of the received Token.</li>
  * </ul>
  */
-public class Credentials {
+public class Credentials implements Parcelable {
 
     @SerializedName("access_token")
     private String accessToken;
@@ -106,4 +108,38 @@ public class Credentials {
     public Long getExpiresIn() {
         return expiresIn;
     }
+
+    @Override
+    public int describeContents() {
+        return 0;
+    }
+
+    @Override
+    public void writeToParcel(Parcel dest, int flags) {
+        dest.writeString(this.accessToken);
+        dest.writeString(this.type);
+        dest.writeString(this.idToken);
+        dest.writeString(this.refreshToken);
+        dest.writeValue(this.expiresIn);
+    }
+
+    protected Credentials(Parcel in) {
+        this.accessToken = in.readString();
+        this.type = in.readString();
+        this.idToken = in.readString();
+        this.refreshToken = in.readString();
+        this.expiresIn = (Long) in.readValue(Long.class.getClassLoader());
+    }
+
+    public static final Parcelable.Creator<Credentials> CREATOR = new Parcelable.Creator<Credentials>() {
+        @Override
+        public Credentials createFromParcel(Parcel source) {
+            return new Credentials(source);
+        }
+
+        @Override
+        public Credentials[] newArray(int size) {
+            return new Credentials[size];
+        }
+    };
 }
