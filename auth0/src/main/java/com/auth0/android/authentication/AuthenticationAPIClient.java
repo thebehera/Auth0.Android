@@ -39,6 +39,7 @@ import com.auth0.android.request.ErrorBuilder;
 import com.auth0.android.request.ParameterizableRequest;
 import com.auth0.android.request.Request;
 import com.auth0.android.request.internal.AuthenticationErrorBuilder;
+import com.auth0.android.request.internal.GsonProvider;
 import com.auth0.android.request.internal.RequestFactory;
 import com.auth0.android.result.Credentials;
 import com.auth0.android.result.DatabaseUser;
@@ -54,15 +55,18 @@ import java.util.Map;
 
 import static com.auth0.android.authentication.ParameterBuilder.GRANT_TYPE_AUTHORIZATION_CODE;
 import static com.auth0.android.authentication.ParameterBuilder.GRANT_TYPE_PASSWORD;
+import static com.auth0.android.authentication.ParameterBuilder.GRANT_TYPE_PASSWORD_REALM;
 import static com.auth0.android.authentication.ParameterBuilder.ID_TOKEN_KEY;
+import static com.auth0.android.authentication.ParameterBuilder.SCOPE_OPENID;
 
 /**
  * API client for Auth0 Authentication API.
- * <p/>
- * <pre><code>
+ * <pre>
+ * {@code
  * Auth0 auth0 = new Auth0("your_client_id", "your_domain");
  * AuthenticationAPIClient client = new AuthenticationAPIClient(auth0);
- * </code></pre>
+ * }
+ * </pre>
  *
  * @see <a href="https://auth0.com/docs/auth-api">Auth API docs</a>
  */
@@ -74,6 +78,9 @@ public class AuthenticationAPIClient {
     private static final String PASSWORD_KEY = "password";
     private static final String EMAIL_KEY = "email";
     private static final String PHONE_NUMBER_KEY = "phone_number";
+    private static final String OAUTH_CODE_KEY = "code";
+    private static final String REDIRECT_URI_KEY = "redirect_uri";
+    private static final String TOKEN_KEY = "token";
     private static final String DELEGATION_PATH = "delegation";
     private static final String ACCESS_TOKEN_PATH = "access_token";
     private static final String SIGN_UP_PATH = "signup";
@@ -86,15 +93,13 @@ public class AuthenticationAPIClient {
     private static final String RESOURCE_OWNER_PATH = "ro";
     private static final String TOKEN_INFO_PATH = "tokeninfo";
     private static final String USER_INFO_PATH = "userinfo";
-    private static final String OAUTH_CODE_KEY = "code";
-    private static final String REDIRECT_URI_KEY = "redirect_uri";
+    private static final String REVOKE_PATH = "revoke";
     private static final String HEADER_AUTHORIZATION = "Authorization";
 
     private final Auth0 auth0;
     private final OkHttpClient client;
-    private final HttpLoggingInterceptor logInterceptor;
     private final Gson gson;
-    private final com.auth0.android.request.internal.RequestFactory factory;
+    private final RequestFactory factory;
     private final ErrorBuilder<AuthenticationException> authErrorBuilder;
 
 
@@ -125,8 +130,9 @@ public class AuthenticationAPIClient {
     private AuthenticationAPIClient(Auth0 auth0, RequestFactory factory, OkHttpClient client, Gson gson) {
         this.auth0 = auth0;
         this.client = client;
-        this.logInterceptor = new HttpLoggingInterceptor().setLevel(HttpLoggingInterceptor.Level.NONE);
-        this.client.interceptors().add(logInterceptor);
+        if (auth0.isLoggingEnabled()) {
+            this.client.interceptors().add(new HttpLoggingInterceptor().setLevel(HttpLoggingInterceptor.Level.BODY));
+        }
         this.gson = gson;
         this.factory = factory;
         this.authErrorBuilder = new AuthenticationErrorBuilder();
@@ -134,21 +140,6 @@ public class AuthenticationAPIClient {
         if (telemetry != null) {
             factory.setClientInfo(telemetry.getValue());
         }
-    }
-
-    /**
-     * Log every Request and Response made by this client.
-     * You shouldn't enable logging in release builds as it may leak sensitive information.
-     */
-    public void setLoggingEnabled(boolean enabled) {
-        logInterceptor.setLevel(enabled ? HttpLoggingInterceptor.Level.BODY : HttpLoggingInterceptor.Level.NONE);
-    }
-
-    /**
-     * Getter for the current client logger enabled state.
-     */
-    public boolean isLoggingEnabled() {
-        return logInterceptor.getLevel() == HttpLoggingInterceptor.Level.BODY;
     }
 
     public String getClientId() {
@@ -170,11 +161,14 @@ public class AuthenticationAPIClient {
     }
 
     /**
-     * Log in a user with email/username and password using a DB connection and the /oauth/ro endpoint.
-     * The default scope used is 'openid'.
-     * Example usage:
-     * <pre><code>
-     * client.login("{username or email}", "{password}", "{database connection name}")
+     * Log in a user with email/username and password for a connection/realm.
+     * In OIDC conformant mode ({@link Auth0#isOIDCConformant()}) it will use the password-realm grant type for the {@code /oauth/token} endpoint
+     * otherwise it will use {@code /oauth/ro}
+     * Example:
+     * <pre>
+     * {@code
+     * client
+     *      .login("{username or email}", "{password}", "{database connection name}")
      *      .start(new BaseCallback<Credentials>() {
      *          {@literal}Override
      *          public void onSuccess(Credentials payload) { }
@@ -182,28 +176,42 @@ public class AuthenticationAPIClient {
      *          {@literal}Override
      *          public void onFailure(AuthenticationException error) { }
      *      });
-     * </code></pre>
+     * }
+     * </pre>
      *
-     * @param usernameOrEmail of the user depending of the type of DB connection
-     * @param password        of the user
-     * @param connection      of the database to authenticate with
+     * @param usernameOrEmail   of the user depending of the type of DB connection
+     * @param password          of the user
+     * @param realmOrConnection realm to use in the authorize flow or the name of the database to authenticate with.
      * @return a request to configure and start that will yield {@link Credentials}
      */
     @SuppressWarnings("WeakerAccess")
-    public AuthenticationRequest login(@NonNull String usernameOrEmail, @NonNull String password, @NonNull String connection) {
-        Map<String, Object> requestParameters = ParameterBuilder.newAuthenticationBuilder()
+    public AuthenticationRequest login(@NonNull String usernameOrEmail, @NonNull String password, @NonNull String realmOrConnection) {
+
+        ParameterBuilder builder = ParameterBuilder.newBuilder()
                 .set(USERNAME_KEY, usernameOrEmail)
-                .set(PASSWORD_KEY, password)
-                .setGrantType(GRANT_TYPE_PASSWORD)
-                .setConnection(connection)
-                .asDictionary();
-        return loginWithResourceOwner(requestParameters);
+                .set(PASSWORD_KEY, password);
+
+        if (auth0.isOIDCConformant()) {
+            final Map<String, Object> parameters = builder
+                    .setGrantType(GRANT_TYPE_PASSWORD_REALM)
+                    .setRealm(realmOrConnection)
+                    .asDictionary();
+            return loginWithToken(parameters);
+        } else {
+            final Map<String, Object> parameters = builder
+                    .setGrantType(GRANT_TYPE_PASSWORD)
+                    .setScope(SCOPE_OPENID)
+                    .setConnection(realmOrConnection)
+                    .asDictionary();
+            return loginWithResourceOwner(parameters);
+        }
     }
 
     /**
-     * Log in a user with email/username and password using the /oauth/token endpoint.
+     * Log in a user with email/username and password using the password grant and the default directory
      * Example usage:
-     * <pre><code>
+     * <pre>
+     * {@code
      * client.login("{username or email}", "{password}")
      *      .start(new BaseCallback<Credentials>() {
      *          {@literal}Override
@@ -212,7 +220,8 @@ public class AuthenticationAPIClient {
      *          {@literal}Override
      *          public void onFailure(AuthenticationException error) { }
      *      });
-     * </code></pre>
+     * }
+     * </pre>
      *
      * @param usernameOrEmail of the user
      * @param password        of the user
@@ -230,10 +239,11 @@ public class AuthenticationAPIClient {
     }
 
     /**
-     * Log in a user with a OAuth 'access_token' of a Identity Provider like Facebook or Twitter using <a href="https://auth0.com/docs/auth-api#!#post--oauth-access_token">'\oauth\access_token' endpoint</a>
+     * Log in a user with a OAuth 'access_token' of a Identity Provider like Facebook or Twitter using <a href="https://auth0.com/docs/api/authentication#social-with-provider-s-access-token">'\oauth\access_token' endpoint</a>
      * The default scope used is 'openid'.
      * Example usage:
-     * <pre><code>
+     * <pre>
+     * {@code
      * client.loginWithOAuthAccessToken("{token}", "{connection name}")
      *      .start(new BaseCallback<Credentials>() {
      *          {@literal}Override
@@ -242,7 +252,8 @@ public class AuthenticationAPIClient {
      *          {@literal}Override
      *          public void onFailure(AuthenticationException error) { }
      *      });
-     * </code></pre>
+     * }
+     * </pre>
      *
      * @param token      obtained from the IdP
      * @param connection that will be used to authenticate the user, e.g. 'facebook'
@@ -269,7 +280,8 @@ public class AuthenticationAPIClient {
      * Log in a user using a phone number and a verification code received via SMS (Part of passwordless login flow)
      * The default scope used is 'openid'.
      * Example usage:
-     * <pre><code>
+     * <pre>
+     * {@code
      * client.loginWithPhoneNumber("{phone number}", "{code}", "{passwordless connection name}")
      *      .start(new BaseCallback<Credentials>() {
      *          {@literal}Override
@@ -278,7 +290,8 @@ public class AuthenticationAPIClient {
      *          {@literal}@Override
      *          public void onFailure(AuthenticationException error) { }
      *      });
-     * </code></pre>
+     * }
+     * </pre>
      *
      * @param phoneNumber      where the user received the verification code
      * @param verificationCode sent by Auth0 via SMS
@@ -301,7 +314,8 @@ public class AuthenticationAPIClient {
      * Log in a user using a phone number and a verification code received via SMS (Part of passwordless login flow).
      * By default it will try to authenticate using the "sms" connection.
      * Example usage:
-     * <pre><code>
+     * <pre>
+     * {@code
      * client.loginWithPhoneNumber("{phone number}", "{code}")
      *      .start(new BaseCallback<Credentials>() {
      *          {@literal}Override
@@ -310,7 +324,8 @@ public class AuthenticationAPIClient {
      *          {@literal}@Override
      *          public void onFailure(AuthenticationException error) { }
      *      });
-     * </code></pre>
+     * }
+     * </pre>
      *
      * @param phoneNumber      where the user received the verification code
      * @param verificationCode sent by Auth0 via SMS
@@ -325,7 +340,8 @@ public class AuthenticationAPIClient {
      * Log in a user using an email and a verification code received via Email (Part of passwordless login flow).
      * The default scope used is 'openid'.
      * Example usage:
-     * <pre><code>
+     * <pre>
+     * {@code
      * client.loginWithEmail("{email}", "{code}", "{passwordless connection name}")
      *      .start(new BaseCallback<Credentials>() {
      *          {@literal}Override
@@ -334,7 +350,8 @@ public class AuthenticationAPIClient {
      *          {@literal}@Override
      *          public void onFailure(AuthenticationException error) { }
      *      });
-     * </code></pre>
+     * }
+     * </pre>
      *
      * @param email            where the user received the verification code
      * @param verificationCode sent by Auth0 via Email
@@ -357,7 +374,8 @@ public class AuthenticationAPIClient {
      * Log in a user using an email and a verification code received via Email (Part of passwordless login flow)
      * By default it will try to authenticate using the "email" connection.
      * Example usage:
-     * <pre><code>
+     * <pre>
+     * {@code
      * client.loginWithEmail("{email}", "{code}")
      *      .start(new BaseCallback<Credentials>() {
      *          {@literal}Override
@@ -366,7 +384,8 @@ public class AuthenticationAPIClient {
      *          {@literal}@Override
      *          public void onFailure(AuthenticationException error) { }
      *      });
-     * </code></pre>
+     * }
+     * </pre>
      *
      * @param email            where the user received the verification code
      * @param verificationCode sent by Auth0 via Email
@@ -380,7 +399,8 @@ public class AuthenticationAPIClient {
     /**
      * Returns the information of the user associated with the given access_token.
      * Example usage:
-     * <pre><code>
+     * <pre>
+     * {@code
      * client.userInfo("{access_token}")
      *      .start(new BaseCallback<UserProfile>() {
      *          {@literal}Override
@@ -389,7 +409,8 @@ public class AuthenticationAPIClient {
      *          {@literal}@Override
      *          public void onFailure(AuthenticationException error) { }
      *      });
-     * </code></pre>
+     * }
+     * </pre>
      *
      * @param accessToken used to fetch it's information
      * @return a request to start
@@ -401,9 +422,10 @@ public class AuthenticationAPIClient {
     }
 
     /**
-     * Fetch the token information from Auth0
+     * Fetch the token information from Auth0.
      * Example usage:
-     * <pre><code>
+     * <pre>
+     * {@code
      * client.tokenInfo("{id_token}")
      *      .start(new BaseCallback<UserProfile>() {
      *          {@literal}Override
@@ -412,7 +434,8 @@ public class AuthenticationAPIClient {
      *          {@literal}@Override
      *          public void onFailure(AuthenticationException error) { }
      *      });
-     * </code></pre>
+     * }
+     * </pre>
      *
      * @param idToken used to fetch it's information
      * @return a request to start
@@ -430,9 +453,10 @@ public class AuthenticationAPIClient {
     }
 
     /**
-     * Creates a user in a DB connection using <a href="https://auth0.com/docs/auth-api#!#post--dbconnections-signup">'/dbconnections/signup' endpoint</a>
+     * Creates a user in a DB connection using <a href="https://auth0.com/docs/api/authentication#signup">'/dbconnections/signup' endpoint</a>
      * Example usage:
-     * <pre><code>
+     * <pre>
+     * {@code
      * client.createUser("{email}", "{password}", "{username}", "{database connection name}")
      *      .start(new BaseCallback<DatabaseUser>() {
      *          {@literal}Override
@@ -441,7 +465,8 @@ public class AuthenticationAPIClient {
      *          {@literal}@Override
      *          public void onFailure(AuthenticationException error) { }
      *      });
-     * </code></pre>
+     * }
+     * </pre>
      *
      * @param email      of the user and must be non null
      * @param password   of the user and must be non null
@@ -470,9 +495,10 @@ public class AuthenticationAPIClient {
     }
 
     /**
-     * Creates a user in a DB connection using <a href="https://auth0.com/docs/auth-api#!#post--dbconnections-signup">'/dbconnections/signup' endpoint</a>
+     * Creates a user in a DB connection using <a href="https://auth0.com/docs/api/authentication#signup">'/dbconnections/signup' endpoint</a>
      * Example usage:
-     * <pre><code>
+     * <pre>
+     * {@code
      * client.createUser("{email}", "{password}", "{database connection name}")
      *      .start(new BaseCallback<DatabaseUser>() {
      *          {@literal}Override
@@ -481,7 +507,8 @@ public class AuthenticationAPIClient {
      *          {@literal}@Override
      *          public void onFailure(AuthenticationException error) { }
      *      });
-     * </code></pre>
+     * }
+     * </pre>
      *
      * @param email      of the user and must be non null
      * @param password   of the user and must be non null
@@ -495,10 +522,11 @@ public class AuthenticationAPIClient {
     }
 
     /**
-     * Creates a user in a DB connection using <a href="https://auth0.com/docs/auth-api#!#post--dbconnections-signup">'/dbconnections/signup' endpoint</a>
-     * and then logs in
+     * Creates a user in a DB connection using <a href="https://auth0.com/docs/api/authentication#signup">'/dbconnections/signup' endpoint</a>
+     * and then logs in the user. How the user is logged in depends on the {@link Auth0#isOIDCConformant()} flag.
      * Example usage:
-     * <pre><code>
+     * <pre>
+     * {@code
      * client.signUp("{email}", "{password}", "{username}", "{database connection name}")
      *      .start(new BaseCallback<Credentials>() {
      *          {@literal}Override
@@ -507,7 +535,8 @@ public class AuthenticationAPIClient {
      *          {@literal}Override
      *          public void onFailure(AuthenticationException error) {}
      *      });
-     * </code></pre>
+     * }
+     * </pre>
      *
      * @param email      of the user and must be non null
      * @param password   of the user and must be non null
@@ -519,14 +548,16 @@ public class AuthenticationAPIClient {
     public SignUpRequest signUp(@NonNull String email, @NonNull String password, @NonNull String username, @NonNull String connection) {
         final DatabaseConnectionRequest<DatabaseUser, AuthenticationException> createUserRequest = createUser(email, password, username, connection);
         final AuthenticationRequest authenticationRequest = login(email, password, connection);
+
         return new SignUpRequest(createUserRequest, authenticationRequest);
     }
 
     /**
-     * Creates a user in a DB connection using <a href="https://auth0.com/docs/auth-api#!#post--dbconnections-signup">'/dbconnections/signup' endpoint</a>
-     * and then logs in
+     * Creates a user in a DB connection using <a href="https://auth0.com/docs/api/authentication#signup">'/dbconnections/signup' endpoint</a>
+     * and then logs in the user. How the user is logged in depends on the {@link Auth0#isOIDCConformant()} flag.
      * Example usage:
-     * <pre><code>
+     * <pre>
+     * {@code
      * client.signUp("{email}", "{password}", "{database connection name}")
      *      .start(new BaseCallback<Credentials>() {
      *          {@literal}Override
@@ -535,7 +566,8 @@ public class AuthenticationAPIClient {
      *          {@literal}Override
      *          public void onFailure(AuthenticationException error) {}
      *      });
-     * </code></pre>
+     * }
+     * </pre>
      *
      * @param email      of the user and must be non null
      * @param password   of the user and must be non null
@@ -544,15 +576,16 @@ public class AuthenticationAPIClient {
      */
     @SuppressWarnings("WeakerAccess")
     public SignUpRequest signUp(@NonNull String email, @NonNull String password, @NonNull String connection) {
-        DatabaseConnectionRequest<DatabaseUser, AuthenticationException> createUserRequest = createUser(email, password, connection);
+        final DatabaseConnectionRequest<DatabaseUser, AuthenticationException> createUserRequest = createUser(email, password, connection);
         final AuthenticationRequest authenticationRequest = login(email, password, connection);
         return new SignUpRequest(createUserRequest, authenticationRequest);
     }
 
     /**
-     * Request a reset password using <a href="https://auth0.com/docs/auth-api#!#post--dbconnections-change_password">'/dbconnections/change_password'</a>
+     * Request a reset password using <a href="https://auth0.com/docs/api/authentication#change-password">'/dbconnections/change_password'</a>
      * Example usage:
-     * <pre><code>
+     * <pre>
+     * {@code
      * client.resetPassword("{email}", "{database connection name}")
      *      .start(new BaseCallback<Void>() {
      *          {@literal}Override
@@ -561,7 +594,8 @@ public class AuthenticationAPIClient {
      *          {@literal}Override
      *          public void onFailure(AuthenticationException error) {}
      *      });
-     * </code></pre>
+     * }
+     * </pre>
      *
      * @param email      of the user to request the password reset. An email will be sent with the reset instructions.
      * @param connection of the database to request the reset password on
@@ -586,9 +620,49 @@ public class AuthenticationAPIClient {
     }
 
     /**
-     * Requests new Credentials using a valid Refresh Token.
+     * Request the revoke of a given refresh_token. Once revoked, the refresh_token cannot be used to obtain new tokens.
+     * The client must be of type 'Native' or have the 'Token Endpoint Authentication Method' set to 'none' for this endpoint to work.
+     * 
      * Example usage:
-     * <pre><code>
+     * <pre>
+     * {@code
+     * client.revokeToken("{refresh_token}")
+     *      .start(new BaseCallback<Void>() {
+     *          {@literal}Override
+     *          public void onSuccess(Void payload) {}
+     *
+     *          {@literal}Override
+     *          public void onFailure(AuthenticationException error) {}
+     *      });
+     * }
+     * </pre>
+     *
+     * @param refreshToken the token to revoke
+     * @return a request to start
+     */
+    @SuppressWarnings("WeakerAccess")
+    public Request<Void, AuthenticationException> revokeToken(@NonNull String refreshToken) {
+        final Map<String, Object> parameters = ParameterBuilder.newBuilder()
+                .setClientId(getClientId())
+                .set(TOKEN_KEY, refreshToken)
+                .asDictionary();
+
+        HttpUrl url = HttpUrl.parse(auth0.getDomainUrl()).newBuilder()
+                .addPathSegment(OAUTH_PATH)
+                .addPathSegment(REVOKE_PATH)
+                .build();
+
+        return factory.POST(url, client, gson, authErrorBuilder)
+                .addParameters(parameters);
+    }
+
+    /**
+     * Requests new Credentials using a valid Refresh Token. The received token will have the same audience and scope as first requested. How the new Credentials are requested depends on the {@link Auth0#isOIDCConformant()} flag.
+     * - If the instance is OIDC Conformant the endpoint will be /oauth/token with 'refresh_token' grant, and the response will include an id_token and an access_token if 'openid' scope was requested when the refresh_token was obtained.
+     * - If the instance is not OIDC Conformant the endpoint will be /delegation with 'urn:ietf:params:oauth:grant-type:jwt-bearer' grant, and the response will include an id_token.
+     * Example usage:
+     * <pre>
+     * {@code
      * client.renewAuth("{refresh_token}")
      *      .addParameter("scope", "openid profile email")
      *      .start(new BaseCallback<Credentials>() {
@@ -598,7 +672,8 @@ public class AuthenticationAPIClient {
      *          {@literal}@Override
      *          public void onFailure(AuthenticationException error) { }
      *      });
-     * </code></pre>
+     * }
+     * </pre>
      *
      * @param refreshToken used to fetch the new Credentials.
      * @return a request to start
@@ -608,22 +683,30 @@ public class AuthenticationAPIClient {
         final Map<String, Object> parameters = ParameterBuilder.newBuilder()
                 .setClientId(getClientId())
                 .setRefreshToken(refreshToken)
-                .setGrantType(ParameterBuilder.GRANT_TYPE_REFRESH_TOKEN)
+                .setGrantType(auth0.isOIDCConformant() ? ParameterBuilder.GRANT_TYPE_REFRESH_TOKEN : ParameterBuilder.GRANT_TYPE_JWT)
                 .asDictionary();
 
-        HttpUrl url = HttpUrl.parse(auth0.getDomainUrl()).newBuilder()
-                .addPathSegment(OAUTH_PATH)
-                .addPathSegment(TOKEN_PATH)
-                .build();
+        HttpUrl url;
+        if (auth0.isOIDCConformant()) {
+            url = HttpUrl.parse(auth0.getDomainUrl()).newBuilder()
+                    .addPathSegment(OAUTH_PATH)
+                    .addPathSegment(TOKEN_PATH)
+                    .build();
+        } else {
+            url = HttpUrl.parse(auth0.getDomainUrl()).newBuilder()
+                    .addPathSegment(DELEGATION_PATH)
+                    .build();
+        }
 
         return factory.POST(url, client, gson, Credentials.class, authErrorBuilder)
                 .addParameters(parameters);
     }
 
     /**
-     * Performs a <a href="https://auth0.com/docs/auth-api#!#post--delegation">delegation</a> request that will yield a new Auth0 'id_token'
+     * Performs a <a href="https://auth0.com/docs/api/authentication#delegation">delegation</a> request that will yield a new Auth0 'id_token'
      * Example usage:
-     * <pre><code>
+     * <pre>
+     * {@code
      * client.delegationWithIdToken("{id token}")
      *      .start(new BaseCallback<Delegation>() {
      *          {@literal}Override
@@ -632,7 +715,8 @@ public class AuthenticationAPIClient {
      *          {@literal}Override
      *          public void onFailure(AuthenticationException error) {}
      *      });
-     * </code></pre>
+     * }
+     * </pre>
      *
      * @param idToken issued by Auth0 for the user. The token must not be expired.
      * @return a request to configure and start
@@ -647,10 +731,11 @@ public class AuthenticationAPIClient {
     }
 
     /**
-     * Performs a <a href="https://auth0.com/docs/auth-api#!#post--delegation">delegation</a> request that will yield a new Auth0 'id_token'.
+     * Performs a <a href="https://auth0.com/docs/api/authentication#delegation">delegation</a> request that will yield a new Auth0 'id_token'.
      * Check our <a href="https://auth0.com/docs/refresh-token">refresh token</a> docs for more information
      * Example usage:
-     * <pre><code>
+     * <pre>
+     * {@code
      * client.delegationWithRefreshToken("{refresh token}")
      *      .start(new BaseCallback<Delegation>() {
      *          {@literal}Override
@@ -659,7 +744,8 @@ public class AuthenticationAPIClient {
      *          {@literal}Override
      *          public void onFailure(AuthenticationException error) {}
      *      });
-     * </code></pre>
+     * }
+     * </pre>
      *
      * @param refreshToken issued by Auth0 for the user when using the 'offline_access' scope when logging in.
      * @return a request to configure and start
@@ -674,9 +760,10 @@ public class AuthenticationAPIClient {
     }
 
     /**
-     * Performs a <a href="https://auth0.com/docs/auth-api#!#post--delegation">delegation</a> request that will yield a delegation token.
+     * Performs a <a href="https://auth0.com/docs/api/authentication#delegation">delegation</a> request that will yield a delegation token.
      * Example usage:
-     * <pre><code>
+     * <pre>
+     * {@code
      * client.delegationWithIdToken("{id token}", "{app type, e.g. firebase}")
      *      .start(new BaseCallback<Map<String, Object>>() {
      *          {@literal}Override
@@ -685,7 +772,8 @@ public class AuthenticationAPIClient {
      *          {@literal}Override
      *          public void onFailure(AuthenticationException error) {}
      *      });
-     * </code></pre>
+     * }
+     * </pre>
      *
      * @param idToken issued by Auth0 for the user. The token must not be expired.
      * @param apiType the delegation 'api_type' parameter
@@ -701,9 +789,10 @@ public class AuthenticationAPIClient {
     }
 
     /**
-     * Start a passwordless flow with <a href="https://auth0.com/docs/auth-api#!#post--with_email">Email</a>
+     * Start a passwordless flow with an <a href="https://auth0.com/docs/api/authentication#get-code-or-link">Email</a>
      * Example usage:
-     * <pre><code>
+     * <pre>
+     * {@code
      * client.passwordlessWithEmail("{email}", PasswordlessType.CODE, "{passwordless connection name}")
      *      .start(new BaseCallback<Void>() {
      *          {@literal}Override
@@ -712,10 +801,12 @@ public class AuthenticationAPIClient {
      *          {@literal}Override
      *          public void onFailure(AuthenticationException error) {}
      *      });
-     * </code></pre>
+     * }
+     * </pre>
      *
      * @param email            that will receive a verification code to use for login
-     * @param passwordlessType indicate whether the email should contain a code, link or magic link (android & iOS)
+     * @param passwordlessType indicate whether the email should contain a code, link or magic link (android {@literal &} iOS)
+     * @param connection       the passwordless connection to start the flow with.
      * @return a request to configure and start
      */
     @SuppressWarnings("WeakerAccess")
@@ -731,10 +822,11 @@ public class AuthenticationAPIClient {
     }
 
     /**
-     * Start a passwordless flow with <a href="https://auth0.com/docs/auth-api#!#post--with_email">Email</a>
+     * Start a passwordless flow with an <a href="https://auth0.com/docs/api/authentication#get-code-or-link">Email</a>
      * By default it will try to authenticate using "email" connection.
      * Example usage:
-     * <pre><code>
+     * <pre>
+     * {@code
      * client.passwordlessWithEmail("{email}", PasswordlessType.CODE)
      *      .start(new BaseCallback<Void>() {
      *          {@literal}Override
@@ -743,10 +835,11 @@ public class AuthenticationAPIClient {
      *          {@literal}Override
      *          public void onFailure(AuthenticationException error) {}
      *      });
-     * </code></pre>
+     * }
+     * </pre>
      *
      * @param email            that will receive a verification code to use for login
-     * @param passwordlessType indicate whether the email should contain a code, link or magic link (android & iOS)
+     * @param passwordlessType indicate whether the email should contain a code, link or magic link (android {@literal &} iOS)
      * @return a request to configure and start
      */
     @SuppressWarnings("WeakerAccess")
@@ -755,9 +848,10 @@ public class AuthenticationAPIClient {
     }
 
     /**
-     * Start a passwordless flow with <a href="https://auth0.com/docs/auth-api#!#post--with_sms">SMS</a>
+     * Start a passwordless flow with a <a href="https://auth0.com/docs/api/authentication#get-code-or-link">SMS</a>
      * Example usage:
-     * <pre><code>
+     * <pre>
+     * {@code
      * client.passwordlessWithSms("{phone number}", PasswordlessType.CODE, "{passwordless connection name}")
      *      .start(new BaseCallback<Void>() {
      *          {@literal}Override
@@ -766,10 +860,12 @@ public class AuthenticationAPIClient {
      *          {@literal}Override
      *          public void onFailure(AuthenticationException error) {}
      *      });
-     * </code></pre>
+     * }
+     * </pre>
      *
      * @param phoneNumber      where an SMS with a verification code will be sent
-     * @param passwordlessType indicate whether the SMS should contain a code, link or magic link (android & iOS)
+     * @param passwordlessType indicate whether the SMS should contain a code, link or magic link (android {@literal &} iOS)
+     * @param connection       the passwordless connection to start the flow with.
      * @return a request to configure and start
      */
     @SuppressWarnings("WeakerAccess")
@@ -784,10 +880,11 @@ public class AuthenticationAPIClient {
     }
 
     /**
-     * Start a passwordless flow with <a href="https://auth0.com/docs/auth-api#!#post--with_sms">SMS</a>
+     * Start a passwordless flow with a <a href="https://auth0.com/docs/api/authentication#get-code-or-link">SMS</a>
      * By default it will try to authenticate using the "sms" connection.
      * Example usage:
-     * <pre><code>
+     * <pre>
+     * {@code
      * client.passwordlessWithSms("{phone number}", PasswordlessType.CODE)
      *      .start(new BaseCallback<Void>() {
      *          {@literal}Override
@@ -796,10 +893,11 @@ public class AuthenticationAPIClient {
      *          {@literal}Override
      *          public void onFailure(AuthenticationException error) {}
      *      });
-     * </code></pre>
+     * }
+     * </pre>
      *
      * @param phoneNumber      where an SMS with a verification code will be sent
-     * @param passwordlessType indicate whether the SMS should contain a code, link or magic link (android & iOS)
+     * @param passwordlessType indicate whether the SMS should contain a code, link or magic link (android {@literal &} iOS)
      * @return a request to configure and start
      */
     @SuppressWarnings("WeakerAccess")
@@ -808,10 +906,11 @@ public class AuthenticationAPIClient {
     }
 
     /**
-     * Performs a custom <a href="https://auth0.com/docs/auth-api#!#post--delegation">delegation</a> request that will
+     * Performs a custom <a href="https://auth0.com/docs/api/authentication#delegation">delegation</a> request that will
      * yield a delegation token.
      * Example usage:
-     * <pre><code>
+     * <pre>
+     * {@code
      * client.delegation()
      *      .addParameter("api_type", "firebase")
      *      .start(new BaseCallback<Map<String, Object>>() {
@@ -821,7 +920,8 @@ public class AuthenticationAPIClient {
      *          {@literal}Override
      *          public void onFailure(AuthenticationException error) {}
      *      });
-     * </code></pre>
+     * }
+     * </pre>
      *
      * @return a request to configure and start
      */
@@ -888,26 +988,26 @@ public class AuthenticationAPIClient {
 
     /**
      * Fetch the token information from Auth0, using the authorization_code grant type
-     * <p/>
      * For Public Client, e.g. Android apps ,you need to provide the code_verifier
      * used to generate the challenge sent to Auth0 {@literal /authorize} method like:
-     * <p/>
-     * <pre>{@code
+     * <pre>
+     * {@code
      * AuthenticationAPIClient client = new AuthenticationAPIClient(new Auth0("clientId", "domain"));
      * client
      *     .token("code", "redirect_uri")
      *     .setCodeVerifier("code_verifier")
      *     .start(new Callback<Credentials> {...});
-     * }</pre>
-     * <p/>
+     * }
+     * </pre>
      * For the rest of clients, clients who can safely keep a {@literal client_secret}, you need to provide it instead like:
-     * <p/>
-     * <pre>{@code
+     * <pre>
+     * {@code
      * AuthenticationAPIClient client = new AuthenticationAPIClient(new Auth0("clientId", "domain"));
      * client
      *     .token("code", "redirect_uri")
      *     .start(new Callback<Credentials> {...});
-     * }</pre>
+     * }
+     * </pre>
      *
      * @param authorizationCode the authorization code received from the /authorize call.
      * @param redirectUri       the uri sent to /authorize as the 'redirect_uri'.

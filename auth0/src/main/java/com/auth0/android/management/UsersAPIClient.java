@@ -49,11 +49,12 @@ import java.util.Map;
 
 /**
  * API client for Auth0 Management API.
- * <p/>
- * <pre><code>
+ * <pre>
+ * {@code
  * Auth0 auth0 = new Auth0("your_client_id", "your_domain");
  * UsersAPIClient client = new UsersAPIClient(auth0);
- * </code></pre>
+ * }
+ * </pre>
  *
  * @see <a href="https://auth0.com/docs/api/management/v2">Auth API docs</a>
  */
@@ -68,7 +69,6 @@ public class UsersAPIClient {
 
     private final Auth0 auth0;
     private final OkHttpClient client;
-    private final HttpLoggingInterceptor logInterceptor;
     private final Gson gson;
     private final RequestFactory factory;
     private final ErrorBuilder<ManagementException> mgmtErrorBuilder;
@@ -102,8 +102,9 @@ public class UsersAPIClient {
     private UsersAPIClient(Auth0 auth0, RequestFactory factory, OkHttpClient client, Gson gson) {
         this.auth0 = auth0;
         this.client = client;
-        this.logInterceptor = new HttpLoggingInterceptor().setLevel(HttpLoggingInterceptor.Level.NONE);
-        this.client.interceptors().add(logInterceptor);
+        if (auth0.isLoggingEnabled()) {
+            this.client.interceptors().add(new HttpLoggingInterceptor().setLevel(HttpLoggingInterceptor.Level.BODY));
+        }
         this.gson = gson;
         this.factory = factory;
         this.mgmtErrorBuilder = new ManagementErrorBuilder();
@@ -111,14 +112,6 @@ public class UsersAPIClient {
         if (telemetry != null) {
             factory.setClientInfo(telemetry.getValue());
         }
-    }
-
-    /**
-     * Log every Request and Response made by this client.
-     * You shouldn't enable logging in release builds as it may leak sensitive information.
-     */
-    public void enableLogging() {
-        logInterceptor.setLevel(HttpLoggingInterceptor.Level.BODY);
     }
 
     public String getClientId() {
@@ -143,16 +136,18 @@ public class UsersAPIClient {
     /**
      * Link a user identity calling <a href="https://auth0.com/docs/link-accounts#the-api">'/api/v2/users/:primaryUserId/identities'</a> endpoint
      * Example usage:
-     * <pre><code>
+     * <pre>
+     * {@code
      * client.link("{auth0 primary user id}", "{user secondary token}")
-     *      .start(new BaseCallback<List<UserIdentity>>() {
+     *      .start(new BaseCallback<List<UserIdentity>, ManagementException>() {
      *          {@literal}Override
      *          public void onSuccess(List<UserIdentity> payload) {}
      *
      *          {@literal}Override
      *          public void onFailure(ManagementException error) {}
      *      });
-     * </code></pre>
+     * }
+     * </pre>
      *
      * @param primaryUserId  of the identity to link
      * @param secondaryToken of the secondary identity obtained after login
@@ -181,16 +176,18 @@ public class UsersAPIClient {
     /**
      * Unlink a user identity calling <a href="https://auth0.com/docs/link-accounts#unlinking-accounts">'/api/v2/users/:primaryToken/identities/secondaryProvider/secondaryUserId'</a> endpoint
      * Example usage:
-     * <pre><code>
+     * <pre>
+     * {@code
      * client.unlink("{auth0 primary user id}", {auth0 secondary user id}, "{secondary provider}")
-     *      .start(new BaseCallback<List<UserIdentity>>() {
+     *      .start(new BaseCallback<List<UserIdentity>, ManagementException>() {
      *          {@literal}Override
      *          public void onSuccess(List<UserIdentity> payload) {}
      *
      *          {@literal}Override
      *          public void onFailure(ManagementException error) {}
      *      });
-     * </code></pre>
+     * }
+     * </pre>
      *
      * @param primaryUserId     of the primary identity to unlink
      * @param secondaryUserId   of the secondary identity you wish to unlink from the main one.
@@ -215,18 +212,20 @@ public class UsersAPIClient {
     }
 
     /**
-     * Update the user_metadata calling <a href="https://auth0.com/docs/api/management/v2#!/Users/patch_users_by_id">'/api/v2/users/:token'</a> endpoint
+     * Update the user_metadata calling <a href="https://auth0.com/docs/api/management/v2#!/Users/patch_users_by_id">'/api/v2/users/:userId'</a> endpoint
      * Example usage:
-     * <pre><code>
+     * <pre>
+     * {@code
      * client.updateMetadata("{user id}", "{user metadata}")
-     *      .start(new BaseCallback<UserProfile>() {
+     *      .start(new BaseCallback<UserProfile, ManagementException>() {
      *          {@literal}Override
      *          public void onSuccess(UserProfile payload) {}
      *
      *          {@literal}Override
      *          public void onFailure(ManagementException error) {}
      *      });
-     * </code></pre>
+     * }
+     * </pre>
      *
      * @param userId       of the primary identity to unlink
      * @param userMetadata to merge with the existing one
@@ -243,6 +242,37 @@ public class UsersAPIClient {
 
         return factory.PATCH(url, client, gson, UserProfile.class, mgmtErrorBuilder)
                 .addParameter(USER_METADATA_KEY, userMetadata);
+    }
+
+    /**
+     * Get the User Profile calling <a href="https://auth0.com/docs/api/management/v2#!/Users/get_users_by_id">'/api/v2/users/:userId'</a> endpoint
+     * Example usage:
+     * <pre>
+     * {@code
+     * client.getProfile("{user id}")
+     *      .start(new BaseCallback<UserProfile, ManagementException>() {
+     *          {@literal}Override
+     *          public void onSuccess(UserProfile payload) {}
+     *
+     *          {@literal}Override
+     *          public void onFailure(ManagementException error) {}
+     *      });
+     * }
+     * </pre>
+     *
+     * @param userId identity of the user
+     * @return a request to start
+     */
+    @SuppressWarnings("WeakerAccess")
+    public Request<UserProfile, ManagementException> getProfile(String userId) {
+        HttpUrl url = HttpUrl.parse(auth0.getDomainUrl()).newBuilder()
+                .addPathSegment(API_PATH)
+                .addPathSegment(V2_PATH)
+                .addPathSegment(USERS_PATH)
+                .addPathSegment(userId)
+                .build();
+
+        return factory.GET(url, client, gson, UserProfile.class, mgmtErrorBuilder);
     }
 
 }
