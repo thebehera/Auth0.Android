@@ -1,11 +1,10 @@
 # Auth0.Android
 
-[![CI Status](http://img.shields.io/travis/auth0/Auth0.Android.svg?style=flat-square)](https://travis-ci.org/auth0/Auth0.Android)
+[![CircleCI](https://img.shields.io/circleci/project/github/auth0/Auth0.Android.svg?style=flat-square)](https://circleci.com/gh/auth0/Auth0.Android/tree/master)
 [![Coverage Status](https://img.shields.io/codecov/c/github/auth0/Auth0.Android/master.svg?style=flat-square)](https://codecov.io/github/auth0/Auth0.Android)
 [![License](http://img.shields.io/:license-mit-blue.svg?style=flat)](http://doge.mit-license.org)
 [![Maven Central](https://img.shields.io/maven-central/v/com.auth0.android/auth0.svg)](http://search.maven.org/#search%7Cgav%7C1%7Cg%3A%22com.auth0.android%22%20AND%20a%3A%22auth0%22)
-[![Bintray](https://api.bintray.com/packages/auth0/lock-android/Auth0.Android/images/download.svg) ](https://bintray.com/auth0/lock-android/Auth0.Android/_latestVersion)
-
+[![Bintray](https://api.bintray.com/packages/auth0/android/auth0/images/download.svg)](https://bintray.com/auth0/android/auth0/_latestVersion)
 
 Android java toolkit for Auth0 API
 
@@ -21,7 +20,7 @@ Auth0.android is available through [Gradle](https://gradle.org/). To install it,
 
 ```gradle
 dependencies {
-    compile 'com.auth0.android:auth0:1.2.0'
+    compile 'com.auth0.android:auth0:1.8.0'
 }
 ```
 
@@ -214,6 +213,24 @@ users
     });
 ```
 
+### Get User Profile
+
+```java
+users
+    .getProfile("user id")
+    .start(new BaseCallback<UserProfile, ManagementException>() {
+        @Override
+        public void onSuccess(UserProfile payload) {
+            //Profile
+        }
+
+        @Override
+        public void onFailure(ManagementException error) {
+            //Error!
+        }
+    });
+```
+
 ### Update User Metadata
 
 ```java
@@ -265,7 +282,7 @@ Also register the intent filters inside your activity's tag, so you can receive 
             android:theme="@style/MyAppTheme"
             android:launchMode="singleTask">
 
-            <intent-filter>
+            <intent-filter android:autoVerify="true">
                 <action android:name="android.intent.action.VIEW" />
 
                 <category android:name="android.intent.category.DEFAULT" />
@@ -300,6 +317,21 @@ public class MyActivity extends Activity {
     }
 }
 
+```
+
+##### A note about App Deep Linking:
+
+Currently, the default scheme used in the Callback Uri is `https`. This works best for Android API 23 or newer if you're using [Android App Links](https://developer.android.com/training/app-links/index.html), but in previous Android versions this may show the intent chooser dialog prompting the user to chose either your application or the browser. You can change this behaviour by using a custom unique scheme, so that the OS opens directly the link with your app.
+
+1. Update the intent filter in the Android Manifest and change the custom scheme.
+2. Update the allowed callback urls in your [Auth0 Dashboard](https://manage.auth0.com/#/applications) client's settings.
+3. Call `withScheme()` passing the scheme you want to use.
+
+
+```java
+WebAuthProvider.init(account)
+                .withScheme("myapp")
+                .start(MainActivity.this, authCallback);
 ```
 
 #### Authenticate with any Auth0 connection
@@ -365,7 +397,7 @@ android {
 ref: https://github.com/square/okio/issues/58#issuecomment-72672263
 
 ##Proguard
-In the [proguard directory](proguard) you can find the *Proguard* configuration
+The rules should be applied automatically if your application is using `minifyEnabled = true`. If you want to include them manually check the [proguard directory](proguard).
 By default you should at least use the following files:
 * `proguard-okio.pro`
 * `proguard-gson.pro`

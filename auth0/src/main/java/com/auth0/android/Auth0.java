@@ -30,11 +30,12 @@ import android.support.annotation.NonNull;
 import android.support.annotation.Nullable;
 
 import com.auth0.android.auth0.BuildConfig;
+import com.auth0.android.authentication.AuthenticationAPIClient;
 import com.auth0.android.util.Telemetry;
 import com.squareup.okhttp.HttpUrl;
 
 /**
- * Represents your Auth0 account information (clientId & domain),
+ * Represents your Auth0 account information (clientId {@literal &} domain),
  * and it's used to obtain clients for Auth0's APIs.
  * <pre>{@code
  * Auth0 auth0 = new Auth0("YOUR_CLIENT_ID", "YOUR_DOMAIN");
@@ -49,7 +50,8 @@ public class Auth0 {
     private final HttpUrl domainUrl;
     private final HttpUrl configurationUrl;
     private Telemetry telemetry;
-
+    private boolean oidcConformant;
+    private boolean loggingEnabled;
 
     /**
      * Creates a new Auth0 instance with the 'com_auth0_client_id' and 'com_auth0_domain' values
@@ -63,7 +65,7 @@ public class Auth0 {
     }
 
     /**
-     * Creates a new object using clientId & domain
+     * Creates a new object using clientId {@literal &} domain
      *
      * @param clientId of your Auth0 application
      * @param domain   of your Auth0 account
@@ -129,7 +131,6 @@ public class Auth0 {
         return telemetry;
     }
 
-
     /**
      * Setter for the Telemetry to send in every request to Auth0.
      *
@@ -144,6 +145,52 @@ public class Auth0 {
      */
     public void doNotSendTelemetry() {
         this.telemetry = null;
+    }
+
+    /**
+     * Defines if the client uses OIDC conformant authentication endpoints. By default is {@code false}
+     * <p>
+     * You will need to enable this setting in the Auth0 Dashboard first: Go to Account (top right), Account Settings, click Advanced and check the toggle at the bottom.
+     * This setting affects how authentication is performed in the following methods:
+     * <ul>
+     * <li>{@link AuthenticationAPIClient#login(String, String, String)}</li>
+     * <li>{@link AuthenticationAPIClient#signUp(String, String, String)}</li>
+     * <li>{@link AuthenticationAPIClient#signUp(String, String, String, String)}</li>
+     * <li>{@link AuthenticationAPIClient#renewAuth(String)}</li>
+     * </ul>
+     *
+     * @param enabled if Lock will use the Legacy Auth API or the new OIDC Conformant Auth API.
+     */
+    public void setOIDCConformant(boolean enabled) {
+        this.oidcConformant = enabled;
+    }
+
+    /**
+     * If the clients works in OIDC conformant mode or not
+     *
+     * @return whether the android client is OIDC conformant or not.
+     */
+    public boolean isOIDCConformant() {
+        return oidcConformant;
+    }
+
+    /**
+     * Getter for the HTTP logger is enabled or not.
+     *
+     * @return whether every Request, Response and other sensitive information should be logged or not.
+     */
+    public boolean isLoggingEnabled() {
+        return loggingEnabled;
+    }
+
+    /**
+     * Log every Request, Response and other sensitive information exchanged using the Auth0 APIs.
+     * You shouldn't enable logging in release builds as it may leak sensitive information.
+     *
+     * @param enabled if every Request, Response and other sensitive information should be logged.
+     */
+    public void setLoggingEnabled(boolean enabled) {
+        loggingEnabled = enabled;
     }
 
     private HttpUrl resolveConfiguration(@Nullable String configurationDomain, @NonNull HttpUrl domainUrl) {

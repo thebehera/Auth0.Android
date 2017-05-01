@@ -21,32 +21,40 @@
  * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
  * THE SOFTWARE.
  */
-apply plugin: 'com.android.library'
-apply from: '../scripts/jacoco.gradle'
-apply from: '../scripts/release.gradle'
+
+apply plugin: 'com.auth0.gradle.oss-library.android'
 
 logger.lifecycle("Using version ${version} for ${name}")
 
-auth0Release {
-    library = "Auth0.Android"
+oss {
+    name 'Auth0.Android'
+    repository 'Auth0.Android'
+    organization 'auth0'
+    description 'Android toolkit for Auth0 API'
+
+    developers {
+        auth0 {
+            displayName = 'Auth0'
+            email = 'oss@auth0.com'
+        }
+        lbalmaceda {
+            displayName = 'Luciano Balmaceda'
+            email = 'luciano.balmaceda@auth0.com'
+        }
+    }
 }
 
 android {
     compileSdkVersion 25
-    buildToolsVersion '25.0.1'
+    buildToolsVersion '25.0.2'
 
     defaultConfig {
         minSdkVersion 15
         targetSdkVersion 25
         versionCode 1
         versionName project.version
-        buildConfigField "String", "LIBRARY_NAME", "\"Auth0.Android\""
-    }
-    buildTypes {
-        release {
-            minifyEnabled false
-            proguardFiles getDefaultProguardFile('proguard-android.txt'), 'proguard-rules.pro'
-        }
+        buildConfigField "String", "LIBRARY_NAME", "\"$project.rootProject.name\""
+        consumerProguardFiles '../proguard/proguard-gson.pro', '../proguard/proguard-okio.pro'
     }
     lintOptions {
         warning 'InvalidPackage'
@@ -59,7 +67,7 @@ dependencies {
     compile 'com.squareup.okhttp:okhttp:2.7.5'
     compile 'com.squareup.okhttp:logging-interceptor:2.7.5'
     compile 'com.google.code.gson:gson:2.6.2'
-    compile 'com.auth0.android:jwtdecode:1.0.0'
+    compile 'com.auth0.android:jwtdecode:1.1.0'
 
     testCompile 'junit:junit:4.12'
     testCompile 'org.hamcrest:java-hamcrest:2.0.0.0'
@@ -69,6 +77,3 @@ dependencies {
     testCompile 'org.robolectric:robolectric:3.1.2'
     testCompile 'com.android.support.test.espresso:espresso-intents:2.2.2'
 }
-
-apply from: '../scripts/maven.gradle'
-apply from: '../scripts/bintray.gradle'

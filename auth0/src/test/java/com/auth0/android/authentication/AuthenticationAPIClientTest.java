@@ -50,8 +50,11 @@ import com.squareup.okhttp.mockwebserver.RecordedRequest;
 import org.junit.After;
 import org.junit.Before;
 import org.junit.Test;
+import org.junit.runner.RunWith;
 import org.mockito.ArgumentCaptor;
 import org.mockito.Mockito;
+import org.robolectric.RobolectricTestRunner;
+import org.robolectric.annotation.Config;
 
 import java.lang.reflect.Type;
 import java.util.HashMap;
@@ -82,6 +85,8 @@ import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
+@RunWith(RobolectricTestRunner.class)
+@Config(constants = com.auth0.android.auth0.BuildConfig.class, sdk = 21, manifest = Config.NONE)
 public class AuthenticationAPIClientTest {
 
     private static final String CLIENT_ID = "CLIENTID";
@@ -96,6 +101,7 @@ public class AuthenticationAPIClientTest {
     private static final String OPENID = "openid";
 
     private AuthenticationAPIClient client;
+    private Auth0 auth0;
     private Gson gson;
 
     private AuthenticationAPI mockAPI;
@@ -104,7 +110,7 @@ public class AuthenticationAPIClientTest {
     public void setUp() throws Exception {
         mockAPI = new AuthenticationAPI();
         final String domain = mockAPI.getDomain();
-        Auth0 auth0 = new Auth0(CLIENT_ID, domain, domain);
+        auth0 = new Auth0(CLIENT_ID, domain, domain);
         client = new AuthenticationAPIClient(auth0);
         gson = new GsonBuilder().serializeNulls().create();
     }
@@ -150,50 +156,7 @@ public class AuthenticationAPIClientTest {
     @Test
     public void shouldEnableHttpLogging() throws Exception {
         Auth0 account = mock(Auth0.class);
-        RequestFactory factory = mock(RequestFactory.class);
-        OkHttpClient okClient = mock(OkHttpClient.class);
-        List list = mock(List.class);
-        when(okClient.interceptors()).thenReturn(list);
-
-        ArgumentCaptor<Interceptor> interceptorCaptor = ArgumentCaptor.forClass(Interceptor.class);
-        AuthenticationAPIClient client = new AuthenticationAPIClient(account, factory, okClient);
-        client.setLoggingEnabled(true);
-
-        verify(okClient).interceptors();
-        verify(list).add(interceptorCaptor.capture());
-
-        assertThat(interceptorCaptor.getValue(), is(notNullValue()));
-        assertThat(interceptorCaptor.getValue(), is(instanceOf(HttpLoggingInterceptor.class)));
-        assertThat(((HttpLoggingInterceptor) interceptorCaptor.getValue()).getLevel(), is(HttpLoggingInterceptor.Level.BODY));
-        assertThat(client.isLoggingEnabled(), is(true));
-    }
-
-    @SuppressWarnings("unchecked")
-    @Test
-    public void shouldDisableHttpLogging() throws Exception {
-        Auth0 account = mock(Auth0.class);
-        RequestFactory factory = mock(RequestFactory.class);
-        OkHttpClient okClient = mock(OkHttpClient.class);
-        List list = mock(List.class);
-        when(okClient.interceptors()).thenReturn(list);
-
-        ArgumentCaptor<Interceptor> interceptorCaptor = ArgumentCaptor.forClass(Interceptor.class);
-        AuthenticationAPIClient client = new AuthenticationAPIClient(account, factory, okClient);
-        client.setLoggingEnabled(false);
-
-        verify(okClient).interceptors();
-        verify(list).add(interceptorCaptor.capture());
-
-        assertThat(interceptorCaptor.getValue(), is(notNullValue()));
-        assertThat(interceptorCaptor.getValue(), is(instanceOf(HttpLoggingInterceptor.class)));
-        assertThat(((HttpLoggingInterceptor) interceptorCaptor.getValue()).getLevel(), is(HttpLoggingInterceptor.Level.NONE));
-        assertThat(client.isLoggingEnabled(), is(false));
-    }
-
-    @SuppressWarnings("unchecked")
-    @Test
-    public void shouldHaveHttpLoggingDisabledByDefault() throws Exception {
-        Auth0 account = mock(Auth0.class);
+        when(account.isLoggingEnabled()).thenReturn(true);
         RequestFactory factory = mock(RequestFactory.class);
         OkHttpClient okClient = mock(OkHttpClient.class);
         List list = mock(List.class);
@@ -207,8 +170,38 @@ public class AuthenticationAPIClientTest {
 
         assertThat(interceptorCaptor.getValue(), is(notNullValue()));
         assertThat(interceptorCaptor.getValue(), is(instanceOf(HttpLoggingInterceptor.class)));
-        assertThat(((HttpLoggingInterceptor) interceptorCaptor.getValue()).getLevel(), is(HttpLoggingInterceptor.Level.NONE));
-        assertThat(client.isLoggingEnabled(), is(false));
+        assertThat(((HttpLoggingInterceptor) interceptorCaptor.getValue()).getLevel(), is(HttpLoggingInterceptor.Level.BODY));
+    }
+
+    @SuppressWarnings("unchecked")
+    @Test
+    public void shouldDisableHttpLogging() throws Exception {
+        Auth0 account = mock(Auth0.class);
+        when(account.isLoggingEnabled()).thenReturn(false);
+        RequestFactory factory = mock(RequestFactory.class);
+        OkHttpClient okClient = mock(OkHttpClient.class);
+        List list = mock(List.class);
+        when(okClient.interceptors()).thenReturn(list);
+
+        new AuthenticationAPIClient(account, factory, okClient);
+
+        verify(okClient, never()).interceptors();
+        verify(list, never()).add(any(Interceptor.class));
+    }
+
+    @SuppressWarnings("unchecked")
+    @Test
+    public void shouldHaveHttpLoggingDisabledByDefault() throws Exception {
+        Auth0 account = mock(Auth0.class);
+        RequestFactory factory = mock(RequestFactory.class);
+        OkHttpClient okClient = mock(OkHttpClient.class);
+        List list = mock(List.class);
+        when(okClient.interceptors()).thenReturn(list);
+
+        new AuthenticationAPIClient(account, factory, okClient);
+
+        verify(okClient, never()).interceptors();
+        verify(list, never()).add(any(Interceptor.class));
     }
 
     @Test
@@ -256,6 +249,7 @@ public class AuthenticationAPIClientTest {
         assertThat(request.getHeader("Accept-Language"), is(getDefaultLocale()));
         Map<String, String> body = bodyFromRequest(request);
         assertThat(body, hasEntry("connection", MY_CONNECTION));
+        assertThat(body, not(hasKey("realm")));
     }
 
     @Test
@@ -272,6 +266,34 @@ public class AuthenticationAPIClientTest {
         assertThat(request.getHeader("Accept-Language"), is(getDefaultLocale()));
         Map<String, String> body = bodyFromRequest(request);
         assertThat(body, hasEntry("connection", MY_CONNECTION));
+        assertThat(body, not(hasKey("realm")));
+    }
+
+    @Test
+    public void shouldLoginWithPasswordReamGrant() throws Exception {
+        mockAPI.willReturnSuccessfulLogin();
+        final MockAuthenticationCallback<Credentials> callback = new MockAuthenticationCallback<>();
+
+        Auth0 auth0 = new Auth0(CLIENT_ID, mockAPI.getDomain(), mockAPI.getDomain());
+        auth0.setOIDCConformant(true);
+        AuthenticationAPIClient client = new AuthenticationAPIClient(auth0);
+        client.login(SUPPORT_AUTH0_COM, "some-password", MY_CONNECTION)
+                .start(callback);
+        assertThat(callback, hasPayloadOfType(Credentials.class));
+
+        final RecordedRequest request = mockAPI.takeRequest();
+        assertThat(request.getHeader("Accept-Language"), is(getDefaultLocale()));
+        Map<String, String> body = bodyFromRequest(request);
+
+        assertThat(request.getPath(), equalTo("/oauth/token"));
+        assertThat(body, hasEntry("client_id", CLIENT_ID));
+        assertThat(body, hasEntry("grant_type", "http://auth0.com/oauth/grant-type/password-realm"));
+        assertThat(body, hasEntry("username", SUPPORT_AUTH0_COM));
+        assertThat(body, hasEntry("password", "some-password"));
+        assertThat(body, hasEntry("realm", MY_CONNECTION));
+        assertThat(body, not(hasKey("connection")));
+        assertThat(body, not(hasKey("scope")));
+        assertThat(body, not(hasKey("audience")));
     }
 
     @Test
@@ -284,12 +306,14 @@ public class AuthenticationAPIClientTest {
         assertThat(callback, hasPayloadOfType(Credentials.class));
 
         final RecordedRequest request = mockAPI.takeRequest();
+        assertThat(request.getPath(), is("/oauth/token"));
         assertThat(request.getHeader("Accept-Language"), is(getDefaultLocale()));
         Map<String, String> body = bodyFromRequest(request);
         assertThat(body, hasEntry("client_id", CLIENT_ID));
         assertThat(body, hasEntry("grant_type", "password"));
         assertThat(body, hasEntry("username", SUPPORT_AUTH0_COM));
         assertThat(body, hasEntry("password", "some-password"));
+        assertThat(body, not(hasKey("realm")));
         assertThat(body, not(hasKey("connection")));
         assertThat(body, not(hasKey("scope")));
         assertThat(body, not(hasKey("audience")));
@@ -305,12 +329,14 @@ public class AuthenticationAPIClientTest {
         assertThat(credentials, is(notNullValue()));
 
         final RecordedRequest request = mockAPI.takeRequest();
+        assertThat(request.getPath(), is("/oauth/token"));
         assertThat(request.getHeader("Accept-Language"), is(getDefaultLocale()));
         Map<String, String> body = bodyFromRequest(request);
         assertThat(body, hasEntry("client_id", CLIENT_ID));
         assertThat(body, hasEntry("grant_type", "password"));
         assertThat(body, hasEntry("username", SUPPORT_AUTH0_COM));
         assertThat(body, hasEntry("password", "some-password"));
+        assertThat(body, not(hasKey("realm")));
         assertThat(body, not(hasKey("connection")));
         assertThat(body, not(hasKey("scope")));
         assertThat(body, not(hasKey("audience")));
@@ -709,6 +735,42 @@ public class AuthenticationAPIClientTest {
         assertThat(loginBody, hasEntry("password", PASSWORD));
         assertThat(loginBody, hasEntry("connection", MY_CONNECTION));
         assertThat(loginBody, hasEntry("scope", OPENID));
+        assertThat(loginBody, not(hasKey("realm")));
+    }
+
+    @Test
+    public void shouldLoginWithUsernameSignedUpUserWithPasswordReamGrant() throws Exception {
+        mockAPI.willReturnSuccessfulSignUp()
+                .willReturnSuccessfulLogin();
+
+        final MockAuthenticationCallback<Credentials> callback = new MockAuthenticationCallback<>();
+        Auth0 auth0 = new Auth0(CLIENT_ID, mockAPI.getDomain(), mockAPI.getDomain());
+        auth0.setOIDCConformant(true);
+        AuthenticationAPIClient client = new AuthenticationAPIClient(auth0);
+        client.signUp(SUPPORT_AUTH0_COM, PASSWORD, SUPPORT, MY_CONNECTION)
+                .start(callback);
+
+        final RecordedRequest request = mockAPI.takeRequest();
+        assertThat(request.getHeader("Accept-Language"), is(getDefaultLocale()));
+        assertThat(request.getPath(), equalTo("/dbconnections/signup"));
+
+        Map<String, String> body = bodyFromRequest(request);
+        assertThat(body, hasEntry("email", SUPPORT_AUTH0_COM));
+        assertThat(body, hasEntry("username", SUPPORT));
+        assertThat(body, hasEntry("password", PASSWORD));
+        assertThat(body, hasEntry("connection", MY_CONNECTION));
+
+        assertThat(callback, hasPayloadOfType(Credentials.class));
+
+        final RecordedRequest loginRequest = mockAPI.takeRequest();
+        assertThat(loginRequest.getPath(), equalTo("/oauth/token"));
+
+        Map<String, String> loginBody = bodyFromRequest(loginRequest);
+        assertThat(loginBody, hasEntry("username", SUPPORT_AUTH0_COM));
+        assertThat(loginBody, hasEntry("password", PASSWORD));
+        assertThat(loginBody, hasEntry("realm", MY_CONNECTION));
+        assertThat(loginBody, not(hasKey("scope")));
+        assertThat(loginBody, not(hasKey("connection")));
     }
 
     @Test
@@ -791,11 +853,56 @@ public class AuthenticationAPIClientTest {
 
         Map<String, String> body = bodyFromRequest(request);
         assertThat(body, hasEntry("email", SUPPORT_AUTH0_COM));
+        assertThat(body, hasEntry("password", PASSWORD));
+        assertThat(body, hasEntry("connection", MY_CONNECTION));
+
+        assertThat(callback, hasPayloadOfType(Credentials.class));
+
+        final RecordedRequest loginRequest = mockAPI.takeRequest();
+        assertThat(loginRequest.getPath(), equalTo("/oauth/ro"));
+
+        Map<String, String> loginBody = bodyFromRequest(loginRequest);
+        assertThat(loginBody, hasEntry("username", SUPPORT_AUTH0_COM));
+        assertThat(loginBody, hasEntry("password", PASSWORD));
+        assertThat(loginBody, hasEntry("connection", MY_CONNECTION));
+        assertThat(loginBody, hasEntry("scope", OPENID));
+        assertThat(loginBody, not(hasKey("realm")));
+    }
+
+    @Test
+    public void shouldLoginSignedUpUserWithPasswordRealmGrant() throws Exception {
+        mockAPI.willReturnSuccessfulSignUp()
+                .willReturnSuccessfulLogin()
+                .willReturnTokenInfo();
+
+        final MockAuthenticationCallback<Credentials> callback = new MockAuthenticationCallback<>();
+        Auth0 auth0 = new Auth0(CLIENT_ID, mockAPI.getDomain(), mockAPI.getDomain());
+        auth0.setOIDCConformant(true);
+        AuthenticationAPIClient client = new AuthenticationAPIClient(auth0);
+        client.signUp(SUPPORT_AUTH0_COM, PASSWORD, MY_CONNECTION)
+                .start(callback);
+
+        final RecordedRequest request = mockAPI.takeRequest();
+        assertThat(request.getHeader("Accept-Language"), is(getDefaultLocale()));
+        assertThat(request.getPath(), equalTo("/dbconnections/signup"));
+
+        Map<String, String> body = bodyFromRequest(request);
+        assertThat(body, hasEntry("email", SUPPORT_AUTH0_COM));
         assertThat(body, not(hasKey("username")));
         assertThat(body, hasEntry("password", PASSWORD));
         assertThat(body, hasEntry("connection", MY_CONNECTION));
 
         assertThat(callback, hasPayloadOfType(Credentials.class));
+
+        final RecordedRequest loginRequest = mockAPI.takeRequest();
+        assertThat(loginRequest.getPath(), equalTo("/oauth/token"));
+
+        Map<String, String> loginBody = bodyFromRequest(loginRequest);
+        assertThat(loginBody, hasEntry("username", SUPPORT_AUTH0_COM));
+        assertThat(loginBody, hasEntry("password", PASSWORD));
+        assertThat(loginBody, hasEntry("realm", MY_CONNECTION));
+        assertThat(loginBody, not(hasKey("scope")));
+        assertThat(loginBody, not(hasKey("connection")));
     }
 
     @Test
@@ -804,6 +911,9 @@ public class AuthenticationAPIClientTest {
                 .willReturnSuccessfulLogin()
                 .willReturnTokenInfo();
 
+        Auth0 auth0 = new Auth0(CLIENT_ID, mockAPI.getDomain(), mockAPI.getDomain());
+        auth0.setOIDCConformant(false);
+        AuthenticationAPIClient client = new AuthenticationAPIClient(auth0);
         final Credentials credentials = client
                 .signUp(SUPPORT_AUTH0_COM, PASSWORD, MY_CONNECTION)
                 .execute();
@@ -819,6 +929,16 @@ public class AuthenticationAPIClientTest {
         assertThat(body, hasEntry("connection", MY_CONNECTION));
 
         assertThat(credentials, is(notNullValue()));
+
+        final RecordedRequest loginRequest = mockAPI.takeRequest();
+        assertThat(loginRequest.getPath(), equalTo("/oauth/ro"));
+
+        Map<String, String> loginBody = bodyFromRequest(loginRequest);
+        assertThat(loginBody, hasEntry("username", SUPPORT_AUTH0_COM));
+        assertThat(loginBody, hasEntry("password", PASSWORD));
+        assertThat(loginBody, hasEntry("connection", MY_CONNECTION));
+        assertThat(loginBody, hasEntry("scope", OPENID));
+        assertThat(loginBody, not(hasKey("realm")));
     }
 
     @Test
@@ -1453,10 +1573,53 @@ public class AuthenticationAPIClientTest {
         assertThat(callback, hasPayloadOfType(Authentication.class));
     }
 
-    @Test
-    public void shouldRenewAuth() throws Exception {
-        mockAPI.willReturnSuccessfulLogin();
 
+    @Test
+    public void shouldRevokeToken() throws Exception {
+        Auth0 auth0 = new Auth0(CLIENT_ID, mockAPI.getDomain(), mockAPI.getDomain());
+        AuthenticationAPIClient client = new AuthenticationAPIClient(auth0);
+
+        mockAPI.willReturnSuccessfulEmptyBody();
+        final MockAuthenticationCallback<Void> callback = new MockAuthenticationCallback<>();
+        client.revokeToken("refreshToken")
+                .start(callback);
+
+        final RecordedRequest request = mockAPI.takeRequest();
+        assertThat(request.getHeader("Accept-Language"), is(getDefaultLocale()));
+        assertThat(request.getPath(), equalTo("/oauth/revoke"));
+
+        Map<String, String> body = bodyFromRequest(request);
+        assertThat(body, hasEntry("client_id", CLIENT_ID));
+        assertThat(body, hasEntry("token", "refreshToken"));
+
+        assertThat(callback, hasNoError());
+    }
+
+    @Test
+    public void shouldRevokeTokenSync() throws Exception {
+        Auth0 auth0 = new Auth0(CLIENT_ID, mockAPI.getDomain(), mockAPI.getDomain());
+        AuthenticationAPIClient client = new AuthenticationAPIClient(auth0);
+
+        mockAPI.willReturnSuccessfulEmptyBody();
+        client.revokeToken("refreshToken")
+                .execute();
+
+        final RecordedRequest request = mockAPI.takeRequest();
+        assertThat(request.getHeader("Accept-Language"), is(getDefaultLocale()));
+        assertThat(request.getPath(), equalTo("/oauth/revoke"));
+
+        Map<String, String> body = bodyFromRequest(request);
+        assertThat(body, hasEntry("client_id", CLIENT_ID));
+        assertThat(body, hasEntry("token", "refreshToken"));
+    }
+
+    @Test
+    public void shouldRenewAuthWithOAuthTokenIfOIDCConformant() throws Exception {
+        Auth0 auth0 = new Auth0(CLIENT_ID, mockAPI.getDomain(), mockAPI.getDomain());
+        auth0.setOIDCConformant(true);
+        AuthenticationAPIClient client = new AuthenticationAPIClient(auth0);
+
+        mockAPI.willReturnSuccessfulLogin();
         final MockAuthenticationCallback<Credentials> callback = new MockAuthenticationCallback<>();
         client.renewAuth("refreshToken")
                 .start(callback);
@@ -1474,9 +1637,12 @@ public class AuthenticationAPIClientTest {
     }
 
     @Test
-    public void shouldRenewAuthSync() throws Exception {
-        mockAPI.willReturnSuccessfulLogin();
+    public void shouldRenewAuthWithOAuthTokenIfOIDCConformantSync() throws Exception {
+        Auth0 auth0 = new Auth0(CLIENT_ID, mockAPI.getDomain(), mockAPI.getDomain());
+        auth0.setOIDCConformant(true);
+        AuthenticationAPIClient client = new AuthenticationAPIClient(auth0);
 
+        mockAPI.willReturnSuccessfulLogin();
         Credentials credentials = client.renewAuth("refreshToken")
                 .execute();
 
@@ -1491,6 +1657,52 @@ public class AuthenticationAPIClientTest {
 
         assertThat(credentials, is(notNullValue()));
     }
+
+    @Test
+    public void shouldRenewAuthWithDelegationIfNotOIDCConformant() throws Exception {
+        Auth0 auth0 = new Auth0(CLIENT_ID, mockAPI.getDomain(), mockAPI.getDomain());
+        auth0.setOIDCConformant(false);
+        AuthenticationAPIClient client = new AuthenticationAPIClient(auth0);
+
+        mockAPI.willReturnSuccessfulLogin();
+        final MockAuthenticationCallback<Credentials> callback = new MockAuthenticationCallback<>();
+        client.renewAuth("refreshToken")
+                .start(callback);
+
+        final RecordedRequest request = mockAPI.takeRequest();
+        assertThat(request.getHeader("Accept-Language"), is(getDefaultLocale()));
+        assertThat(request.getPath(), equalTo("/delegation"));
+
+        Map<String, String> body = bodyFromRequest(request);
+        assertThat(body, hasEntry("client_id", CLIENT_ID));
+        assertThat(body, hasEntry("refresh_token", "refreshToken"));
+        assertThat(body, hasEntry("grant_type", "urn:ietf:params:oauth:grant-type:jwt-bearer"));
+
+        assertThat(callback, hasPayloadOfType(Credentials.class));
+    }
+
+    @Test
+    public void shouldRenewAuthWithDelegationIfNotOIDCConformantSync() throws Exception {
+        Auth0 auth0 = new Auth0(CLIENT_ID, mockAPI.getDomain(), mockAPI.getDomain());
+        auth0.setOIDCConformant(false);
+        AuthenticationAPIClient client = new AuthenticationAPIClient(auth0);
+
+        mockAPI.willReturnSuccessfulLogin();
+        Credentials credentials = client.renewAuth("refreshToken")
+                .execute();
+
+        final RecordedRequest request = mockAPI.takeRequest();
+        assertThat(request.getHeader("Accept-Language"), is(getDefaultLocale()));
+        assertThat(request.getPath(), equalTo("/delegation"));
+
+        Map<String, String> body = bodyFromRequest(request);
+        assertThat(body, hasEntry("client_id", CLIENT_ID));
+        assertThat(body, hasEntry("refresh_token", "refreshToken"));
+        assertThat(body, hasEntry("grant_type", "urn:ietf:params:oauth:grant-type:jwt-bearer"));
+
+        assertThat(credentials, is(notNullValue()));
+    }
+
 
     @Test
     public void shouldFetchProfileSyncAfterLoginRequest() throws Exception {

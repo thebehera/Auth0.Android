@@ -1,4 +1,4 @@
-package com.auth0.android.authentication;
+package com.auth0.android.request.internal;
 
 import com.auth0.android.result.Credentials;
 import com.google.gson.JsonParseException;
@@ -32,8 +32,7 @@ public class CredentialsGsonTest extends GsonBaseTest {
     }
 
     @Test
-    public void shouldFailWithEmptyJson() throws Exception {
-        expectedException.expect(JsonParseException.class);
+    public void shouldNotFailWithEmptyJson() throws Exception {
         buildCredentialsFrom(json(EMPTY_OBJECT));
     }
 
@@ -44,14 +43,12 @@ public class CredentialsGsonTest extends GsonBaseTest {
     }
 
     @Test
-    public void shouldRequireAccessToken() throws Exception {
-        expectedException.expect(JsonParseException.class);
+    public void shouldNotRequireAccessToken() throws Exception {
         buildCredentialsFrom(new StringReader("{\"token_type\": \"bearer\"}"));
     }
 
     @Test
-    public void shouldRequireTokenType() throws Exception {
-        expectedException.expect(JsonParseException.class);
+    public void shouldNotRequireTokenType() throws Exception {
         buildCredentialsFrom(new StringReader("{\"access_token\": \"some token\"}"));
     }
 
@@ -63,6 +60,7 @@ public class CredentialsGsonTest extends GsonBaseTest {
         assertThat(credentials.getIdToken(), is(nullValue()));
         assertThat(credentials.getType(), equalTo("bearer"));
         assertThat(credentials.getRefreshToken(), is(nullValue()));
+        assertThat(credentials.getExpiresIn(), is(86000L));
     }
 
     @Test
@@ -73,6 +71,7 @@ public class CredentialsGsonTest extends GsonBaseTest {
         assertThat(credentials.getIdToken(), is(notNullValue()));
         assertThat(credentials.getType(), equalTo("bearer"));
         assertThat(credentials.getRefreshToken(), is(nullValue()));
+        assertThat(credentials.getExpiresIn(), is(86000L));
     }
 
     @Test
@@ -83,6 +82,7 @@ public class CredentialsGsonTest extends GsonBaseTest {
         assertThat(credentials.getIdToken(), is(notNullValue()));
         assertThat(credentials.getType(), equalTo("bearer"));
         assertThat(credentials.getRefreshToken(), is(notNullValue()));
+        assertThat(credentials.getExpiresIn(), is(86000L));
     }
 
     private Credentials buildCredentialsFrom(Reader json) throws IOException {
